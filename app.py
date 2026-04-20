@@ -5,7 +5,38 @@ from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 🔐 CONEXÃO
+# ---------------- LOGIN ----------------
+usuarios = {
+    "raul": "123",
+    "pedro": "123",
+    "vini": "123"
+}
+
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+def tela_login():
+    st.title("🔐 Login")
+    usuario = st.text_input("Usuário")
+    senha = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        if usuario in usuarios and usuarios[usuario] == senha:
+            st.session_state.logado = True
+            st.session_state.usuario = usuario
+            st.rerun()
+        else:
+            st.error("Usuário ou senha inválidos")
+
+def logout():
+    st.session_state.logado = False
+    st.rerun()
+
+if not st.session_state.logado:
+    tela_login()
+    st.stop()
+
+# ---------------- CONEXÃO ----------------
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
@@ -26,6 +57,11 @@ def atualizar(tabela, dados, campo, valor):
     supabase.table(tabela).update(dados).eq(campo, valor).execute()
 
 # ---------------- MENU ----------------
+st.sidebar.write(f"👤 {st.session_state.usuario}")
+
+if st.sidebar.button("Sair"):
+    logout()
+
 menu = st.sidebar.radio("Menu", [
     "📊 Dashboard",
     "💰 Vendas",
@@ -45,68 +81,69 @@ if menu == "📊 Dashboard":
     custos = carregar_df("custos_mensais")
     fixos = carregar_df("custos_fixos")
     invest = carregar_df("investimentos")
-    produtos = carregar_df("produtos")
 
     faturamento = vendas["preco"].sum() if not vendas.empty else 0
     lucro = vendas["lucro"].sum() if not vendas.empty else 0
     custo_fixo = fixos["valor"].sum() if not fixos.empty else 0
     invest_total = invest["valor"].sum() if not invest.empty else 0
 
-    lucro_real = lucro - custo_fixo - invest_total
-
     st.title("📊 Dashboard")
 
     st.metric("Faturamento", f"R$ {faturamento:.2f}")
     st.metric("Lucro Bruto", f"R$ {lucro:.2f}")
-    st.metric("Lucro REAL", f"R$ {lucro_real:.2f}")
-
-    # Estoque baixo
-    st.subheader("⚠️ Estoque baixo")
-    if not produtos.empty:
-        baixo = produtos[produtos["estoque"] <= 5]
-        st.dataframe(baixo[["nome", "estoque"]])
-
-    # Previsão
-    st.subheader("📈 Previsão")
-    if not vendas.empty:
-        vendas_mes = vendas[vendas["mes"] == datetime.today().strftime("%m/%Y")]
-        if not vendas_mes.empty:
-            dias = datetime.today().day
-            fat_prev = (vendas_mes["preco"].sum() / dias) * 30
-            lucro_prev = (vendas_mes["lucro"].sum() / dias) * 30
-            st.write(f"Faturamento previsto: R$ {fat_prev:.2f}")
-            st.write(f"Lucro previsto: R$ {lucro_prev - custo_fixo:.2f}")
+    st.metric("Lucro Real", f"R$ {lucro - custo_fixo - invest_total:.2f}")
 
 # ---------------- PRODUTOS ----------------
 elif menu == "📦 Produtos":
 
     st.title("📦 Produtos")
 
+    df = carregar_df("produtos")
+
+    st.subheader("➕ Novo Produto")
     nome = st.text_input("Nome")
     custo = st.number_input("Custo")
     estoque = st.number_input("Estoque", step=1)
 
     if st.button("Cadastrar"):
         inserir("produtos", {"nome": nome, "custo": custo, "estoque": estoque, "ativo":1})
+        st.success("Cadastrado")
 
-    df = carregar_df("produtos")
-    st.dataframe(df)
+    st.divider()
 
     if not df.empty:
-        prod = st.selectbox("Produto", df["nome"])
+        st.subheader("✏️ Editar / Excluir")
 
-        if st.button("Desativar"):
-            atualizar("produtos", {"ativo":0}, "nome", prod)
+        prod_id = st.selectbox("Produto", df["id"])
+        prod = df[df["id"] == prod_id].iloc[0]
 
-        if st.button("Excluir"):
-            deletar("produtos", "nome", prod)
+        novo_nome = st.text_input("Nome", value=prod["nome"])
+        novo_custo = st.number_input("Custo", value=float(prod["custo"]))
+        novo_estoque = st.number_input("Estoque", value=int(prod["estoque"]))
+
+        col1, col2 = st.columns(2)
+
+        if col1.button("Atualizar Produto"):
+            atualizar("produtos",
+                      {"nome": novo_nome, "custo": novo_custo, "estoque": novo_estoque},
+                      "id", prod_id)
+            st.success("Atualizado")
+
+        if col2.button("Excluir Produto"):
+            deletar("produtos", "id", prod_id)
+            st.warning("Excluído")
+
+    st.dataframe(df)
 
 # ---------------- EMBALAGENS ----------------
 elif menu == "📦 Embalagens":
 
     st.title("📦 Embalagens")
 
+    df = carregar_df("embalagens")
     produtos = carregar_df("produtos")
+
+    st.subheader("➕ Nova Embalagem")
 
     if not produtos.empty:
         produto = st.selectbox("Produto", produtos["nome"])
@@ -114,7 +151,7 @@ elif menu == "📦 Embalagens":
         custo_total = st.number_input("Custo total")
         qtd = st.number_input("Quantidade", step=1)
 
-        if st.button("Cadastrar"):
+        if st.button("Cadastrar Embalagem"):
             inserir("embalagens", {
                 "produto": produto,
                 "descricao": desc,
@@ -122,56 +159,165 @@ elif menu == "📦 Embalagens":
                 "estoque": qtd,
                 "ativo":1
             })
+            st.success("Cadastrado")
 
-    st.dataframe(carregar_df("embalagens"))
+    st.divider()
 
-# ---------------- VENDAS ----------------
-elif menu == "💰 Vendas":
+    if not df.empty:
+        st.subheader("✏️ Editar / Excluir")
 
-    st.title("💰 Nova Venda")
+        emb_id = st.selectbox("Embalagem", df["id"])
+        emb = df[df["id"] == emb_id].iloc[0]
 
-    produtos = carregar_df("produtos")
-    embalagens = carregar_df("embalagens")
+        nova_desc = st.text_input("Descrição", value=emb["descricao"])
+        novo_custo = st.number_input("Custo unitário", value=float(emb["custo_unit"]))
+        novo_estoque = st.number_input("Estoque", value=int(emb["estoque"]))
 
-    if not produtos.empty:
+        col1, col2 = st.columns(2)
 
-        produto = st.selectbox("Produto", produtos["nome"])
-        prod = produtos[produtos["nome"] == produto].iloc[0]
+        if col1.button("Atualizar Embalagem"):
+            atualizar("embalagens",
+                      {"descricao": nova_desc, "custo_unit": novo_custo, "estoque": novo_estoque},
+                      "id", emb_id)
+            st.success("Atualizado")
 
-        emb = embalagens[embalagens["produto"] == produto]
+        if col2.button("Excluir Embalagem"):
+            deletar("embalagens", "id", emb_id)
+            st.warning("Excluído")
 
-        if not emb.empty:
-            emb_info = emb.iloc[0]
+    st.dataframe(df)
 
-            margem = st.slider("Margem %", 0, 100, 30)
+# ---------------- CUSTOS ----------------
+elif menu == "📅 Custos":
 
-            custo_base = prod["custo"] + emb_info["custo_unit"] + 0.10
-            preco_sug = (custo_base + 6) / (1 - 0.12 - margem/100)
+    st.title("📅 Custos Mensais")
 
-            st.info(f"Preço sugerido: R$ {preco_sug:.2f}")
+    df = carregar_df("custos_mensais")
 
-            preco = st.number_input("Preço", value=float(preco_sug))
+    st.subheader("➕ Novo Custo")
 
-            taxa = preco * 0.12 + 6
-            custo_total = custo_base + taxa
-            lucro = preco - custo_total
+    mes = st.text_input("Mês")
+    valor = st.number_input("Valor")
+    desc = st.text_input("Descrição")
 
-            st.write(f"Lucro: R$ {lucro:.2f}")
+    if st.button("Salvar Custo"):
+        inserir("custos_mensais", {"mes": mes, "valor": valor, "descricao": desc})
+        st.success("Salvo")
 
-            if st.button("Confirmar venda"):
+    st.divider()
 
-                inserir("vendas", {
-                    "data": str(datetime.today()),
-                    "produto": produto,
-                    "preco": preco,
-                    "custo_total": custo_total,
-                    "lucro": lucro,
-                    "mes": datetime.today().strftime("%m/%Y")
-                })
+    if not df.empty:
+        st.subheader("✏️ Editar / Excluir")
 
-                atualizar("produtos",
-                          {"estoque": int(prod["estoque"]) - 1},
-                          "nome", produto)
+        cid = st.selectbox("Custo", df["id"])
+        c = df[df["id"] == cid].iloc[0]
+
+        novo_mes = st.text_input("Mês", value=c["mes"])
+        novo_valor = st.number_input("Valor", value=float(c["valor"]))
+        nova_desc = st.text_input("Descrição", value=c["descricao"])
+
+        col1, col2 = st.columns(2)
+
+        if col1.button("Atualizar Custo"):
+            atualizar("custos_mensais",
+                      {"mes": novo_mes, "valor": novo_valor, "descricao": nova_desc},
+                      "id", cid)
+            st.success("Atualizado")
+
+        if col2.button("Excluir Custo"):
+            deletar("custos_mensais", "id", cid)
+            st.warning("Excluído")
+
+    st.dataframe(df)
+
+# ---------------- INVESTIMENTOS ----------------
+elif menu == "💸 Investimentos":
+
+    st.title("💸 Investimentos")
+
+    df = carregar_df("investimentos")
+
+    st.subheader("➕ Novo Investimento")
+
+    desc = st.text_input("Descrição")
+    valor = st.number_input("Valor")
+
+    if st.button("Salvar Investimento"):
+        inserir("investimentos", {
+            "data": str(datetime.today()),
+            "descricao": desc,
+            "valor": valor
+        })
+        st.success("Salvo")
+
+    st.divider()
+
+    if not df.empty:
+        st.subheader("✏️ Editar / Excluir")
+
+        iid = st.selectbox("Investimento", df["id"])
+        i = df[df["id"] == iid].iloc[0]
+
+        nova_desc = st.text_input("Descrição", value=i["descricao"])
+        novo_valor = st.number_input("Valor", value=float(i["valor"]))
+
+        col1, col2 = st.columns(2)
+
+        if col1.button("Atualizar Investimento"):
+            atualizar("investimentos",
+                      {"descricao": nova_desc, "valor": novo_valor},
+                      "id", iid)
+            st.success("Atualizado")
+
+        if col2.button("Excluir Investimento"):
+            deletar("investimentos", "id", iid)
+            st.warning("Excluído")
+
+    st.dataframe(df)
+
+# ---------------- METAS ----------------
+elif menu == "🎯 Metas":
+
+    st.title("🎯 Metas")
+
+    df = carregar_df("metas")
+
+    st.subheader("➕ Nova Meta")
+
+    desc = st.text_input("Descrição")
+    valor = st.number_input("Valor")
+    tipo = st.selectbox("Tipo", ["Reinvestir", "Retirada"])
+
+    if st.button("Salvar Meta"):
+        inserir("metas", {"descricao": desc, "valor": valor, "tipo": tipo})
+        st.success("Salvo")
+
+    st.divider()
+
+    if not df.empty:
+        st.subheader("✏️ Editar / Excluir")
+
+        mid = st.selectbox("Meta", df["id"])
+        m = df[df["id"] == mid].iloc[0]
+
+        nova_desc = st.text_input("Descrição", value=m["descricao"])
+        novo_valor = st.number_input("Valor", value=float(m["valor"]))
+        novo_tipo = st.selectbox("Tipo", ["Reinvestir", "Retirada"],
+                                 index=0 if m["tipo"]=="Reinvestir" else 1)
+
+        col1, col2 = st.columns(2)
+
+        if col1.button("Atualizar Meta"):
+            atualizar("metas",
+                      {"descricao": nova_desc, "valor": novo_valor, "tipo": novo_tipo},
+                      "id", mid)
+            st.success("Atualizado")
+
+        if col2.button("Excluir Meta"):
+            deletar("metas", "id", mid)
+            st.warning("Excluído")
+
+    st.dataframe(df)
 
 # ---------------- HISTÓRICO ----------------
 elif menu == "📋 Histórico":

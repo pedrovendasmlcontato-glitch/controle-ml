@@ -6,8 +6,8 @@ from supabase import create_client
 st.set_page_config(layout="wide")
 
 # 🔐 CONEXÃO
-SUPABASE_URL = "https://raktzwefuodxhazkasrb.supabase.co"
-SUPABASE_KEY = "sb_publishable_KbXdp-zOKOq-NXt6Th7WUw_9Y9oolQm"
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
